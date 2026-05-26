@@ -1,4 +1,4 @@
-# Digital Methods in the Humanities and Social Sciences (HASS)
+# Digital Archives and Methods Repository
 
 Welcome to the core repository for the Digital Archives and Methods portfolio of Laura Emilie Hollænder Jensen. This repository contains a collection of portfolio assignments completed for the course. 
 ### Portfolio 2: Danish Monarchs
