@@ -1,0 +1,344 @@
+---
+title: "What's worth keeping?" 
+subtitle: "An analysis of Danish culture heritage management practices over time"
+author: "Laura Emilie Hollænder Jensen"
+date: "2026-05-25"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Loading packages and data
+```{r}
+library(tidygeocoder)
+library(tidyverse)
+library(ggplot2)
+library(leaflet)
+library(leaflet.extras)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+#webshot::install_phantomjs()
+
+buildings <- read_csv2("data/listed_buildings_geocoded_english.csv")
+glimpse(buildings)
+```
+
+# 1. Mapping listed buildings in Denmark
+### Map 1: With clusters to show geographical dispersion of listed buildings.
+```{r}
+# Removing NAs for mapping 
+buildings_for_mapping <- buildings %>% 
+  filter(!is.na(Latitude) & !is.na(Longitude))
+
+# Making a leaflet map
+cluster_map <- leaflet(buildings_for_mapping) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+    addCircleMarkers(
+    lng = ~Longitude, 
+    lat = ~Latitude, 
+    radius = 5,
+    fillColor = "#2B5C8F", 
+    fillOpacity = 0.8,
+    stroke = TRUE, 
+    weight = 1, 
+    color = "#FFFFFF",     
+        popup = ~paste0(
+      "<h3>", htmlEscape(Building), "</h3>",
+      "<b>Address:</b> ", htmlEscape(Address), "<br>",
+      "<b>Municipality:</b> ", htmlEscape(Municipality), "<br>",
+      "<b>Year of Construction:</b> ", htmlEscape(ifelse(is.na(Year_of_construction) | Year_of_construction == "", "Unknown", Year_of_construction)), "<br>",
+      "<b>Year of Listing:</b> ", htmlEscape(ifelse(is.na(Year_of_listing) | Year_of_listing == "", "Unknown", Year_of_listing)), "<br>",
+      "<b>Architectural Period:</b> ", htmlEscape(ifelse(is.na(Period) | Period == "", "Unknown", Period))
+    ),
+        clusterOptions = markerClusterOptions(
+      disableClusteringAtZoom = 16, 
+      maxClusterRadius = 40         
+    )
+  )
+
+# Take a snapshot of the map
+mapshot(
+  cluster_map, 
+  file = "cluster_map_snapshot.png",
+  vwidth = 1600,    
+  vheight = 1200,   
+  zoom = 2           
+)
+
+cluster_map
+```
+
+### Map 2: With toggle option to visualise the spread of listed buildings by architectural period.
+```{r}
+buildings_for_mapping <- buildings_for_mapping %>%
+  mutate(
+    Period = ifelse(is.na(Period), "Year of construction unknown", as.character(Period)),
+    Period = factor(Period, levels = c(
+      "Medieval", "Renaissance", "Baroque and rococo", 
+      "Classicism", "Historicism", "Modernism", "Year of construction unknown"
+    ))
+  )
+
+period_colors <- colorFactor(
+  palette = c(
+    "Medieval"                     = "#2D1610", 
+    "Renaissance"                  = "#8B1E14", 
+    "Baroque and rococo"           = "#C25E1A", 
+    "Classicism"                   = "#D9A74A", 
+    "Historicism"                  = "#2B5C8F", 
+    "Modernism"                    = "#2E8B57", 
+    "Year of construction unknown" = "#71717A"  
+  ),
+  domain = buildings_for_mapping$Period,
+  ordered = TRUE
+)
+
+# Making a leaflet map
+toggle_map <- leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+# Adding every period as an independent layer
+period_list <- levels(buildings_for_mapping$Period)
+
+for (p in period_list) {
+  data_sub <- buildings_for_mapping %>% filter(Period == p)
+  
+  if (nrow(data_sub) > 0) {
+    toggle_map <- toggle_map %>%
+      addCircleMarkers(
+        data = data_sub, 
+        lng = ~Longitude, lat = ~Latitude, radius = 5,
+        fillColor = ~period_colors(Period), fillOpacity = 0.8,
+        stroke = TRUE, weight = 1, color = "#FFFFFF",
+        popup = ~paste0(
+          "<h3>", htmlEscape(Building), "</h3>",
+          "<b>Period:</b> ", htmlEscape(Period), "<br>",
+          "<b>Address:</b> ", htmlEscape(Address), ", ", htmlEscape(Municipality), "<br>",
+          "<b>Year of Construction:</b> ", htmlEscape(ifelse(is.na(Year_of_construction) | Year_of_construction == "", "Unknown", Year_of_construction)), "<br>",
+          "<b>Year of Listing:</b> ", htmlEscape(ifelse(is.na(Year_of_listing) | Year_of_listing == "", "Unknown", Year_of_listing))
+        ),
+        group = p 
+      )
+  }
+}
+
+# Adding toggle switch box for the different architectural periods.
+toggle_map <- toggle_map %>%
+  addLayersControl(
+    overlayGroups = period_list,
+    options = layersControlOptions(collapsed = FALSE),
+    position = "topright"
+  ) %>%
+  addLegend(
+    pal = period_colors, 
+    # FIX: Updated data source reference
+    values = buildings_for_mapping$Period, 
+    title = "Architectural period",
+    position = "bottomright"
+  ) 
+
+# Take a snapshot of the map
+mapshot(
+  toggle_map, 
+  file = "toggle_map_snapshot.png",
+  vwidth = 1600,     
+  vheight = 1200,    
+  zoom = 2          
+)
+
+# Display map
+toggle_map
+```
+
+# 2. Plotting listed buildings in Denmark
+### Plot 1: Listed buildings in Denmark by architectural period
+```{r}
+buildings_for_plotting <- buildings %>%
+  filter(!is.na(Period)) %>% 
+  count(Period) %>% 
+    mutate(Period = factor(Period, levels = c(
+    "Medieval", "Renaissance", "Baroque and rococo", 
+    "Classicism", "Historicism", "Modernism"
+  ))) %>% 
+    arrange(Period)
+
+plot_periods <- ggplot(buildings_for_plotting, aes(x = Period, y = n, fill = Period)) +
+  geom_col(show.legend = FALSE, width = 0.65) +
+  geom_text(aes(label = n), vjust = -0.5, size = 4, family = "Georgia") +
+    scale_x_discrete(labels = c(
+    "Baroque and rococo" = "Baroque & rococo\n(1650-1749)",
+    "Classicism"         = "Classicism\n(1750-1849)",
+    "Historicism"        = "Historicism\n(1850-1944)",
+    "Medieval"           = "Medieval\n(-1536)",
+    "Modernism"          = "Modernism\n(1945-)",
+    "Renaissance"        = "Renaissance\n(1536-1649)"
+  )) +
+    scale_fill_manual(values = c(
+    "Medieval"                     = "#2D1610", 
+    "Renaissance"                  = "#8B1E14", 
+    "Baroque and rococo"           = "#C25E1A", 
+    "Classicism"                   = "#D9A74A", 
+    "Historicism"                  = "#2B5C8F", 
+    "Modernism"                    = "#2E8B57"
+  )) +
+    labs(
+    title = "Listed buildings in Denmark by architectural period",
+    x = "Architectural period",
+    y = "Number of buildings",
+    caption = "Data: Slots- og Kulturstyrelsen (2026)"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Georgia"),
+    plot.title = element_text(face = "bold")
+  )
+
+# Display and save
+print(plot_periods)
+ggsave(filename = "architectural_periods_plot.png", plot = plot_periods, width = 8, height = 5)
+
+```
+
+### Plot 2: Listings over time
+```{r}
+plot_listings <- buildings %>% 
+  filter(!is.na(Year_of_listing),
+         Year_of_listing >= 1918, 
+         Year_of_listing <= 2026) %>%
+  ggplot(aes(x = Year_of_listing)) +
+  geom_histogram(
+    binwidth = 5,
+    fill = "#8B1E14", color = "white", linewidth = 0.4
+  ) +
+  scale_x_continuous(breaks = seq(1900, 2026, 10)) +
+  scale_y_continuous(breaks = seq(0, 1000, 100)) +
+  labs(
+    title    = "When were buildings granted protected status?",
+    subtitle = "Each bar represents five years",
+    x = "Year of listing", y = "Number of buildings"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Georgia"),
+    plot.title = element_text(face = "bold"))
+  
+print(plot_listings)
+ggsave(filename = "listings_over_time_plot.png", plot = plot_listings, width = 8, height = 5)
+
+```
+
+### Plot 3: Building age at listing over time
+```{r}
+five_year_summary <- buildings %>% 
+  mutate(
+    Year_of_listing = as.numeric(Year_of_listing),
+    Year_of_construction = as.numeric(Year_of_construction)
+  ) %>% 
+  filter(!is.na(Year_of_listing), !is.na(Year_of_construction),
+         Year_of_listing >= 1918, Year_of_listing <= 2026,
+         Year_of_construction > 0) %>% 
+  
+  mutate(Age_at_listing = Year_of_listing - Year_of_construction) %>% 
+  filter(Age_at_listing >= 0) %>% 
+  
+  mutate(Five_Year_Period = floor(Year_of_listing / 5) * 5) %>% 
+  
+  group_by(Five_Year_Period) %>% 
+  summarise(
+    Median_Age = median(Age_at_listing),
+    Total_Listings = n()
+  )
+
+plot_five_year_trend <- ggplot(five_year_summary, aes(x = Five_Year_Period, y = Median_Age)) +
+  
+  geom_line(color = "darkred", size = 1) + 
+  geom_point(aes(size = Total_Listings), color = "darkred", alpha = 0.8) +
+  
+  # Space out x-axis markings every 10 years so the labels look clean
+  scale_x_continuous(breaks = seq(1910, 2026, 10)) +
+  
+  labs(
+    title = "How old were buildings when they were listed?",
+    subtitle = "Development in building age at year of listing",
+    x = "Year of listing",
+    y = "Median age at listing (years)",
+    size = "Buildings\nlisted",
+    caption = "Data: Slots- og Kulturstyrelsen (2026)"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Georgia"),
+    plot.title = element_text(face = "bold")
+  )
+
+# Print and save
+print(plot_five_year_trend)
+ggsave("listings_5_year_bubbles.png", plot = plot_five_year_trend, width = 8, height = 5)
+```
+
+### Plot 4: Top 10 municipalities by listing numbers over time
+```{r}
+library(tidyverse)
+library(tidytext)
+
+academic_font <- "Georgia"
+
+#Calculate the top 10 municipalities for each decade
+top_municipalities_by_decade <- buildings %>% 
+  mutate(
+    Year_of_listing = as.numeric(Year_of_listing)
+  ) %>% 
+  filter(!is.na(Year_of_listing), !is.na(Municipality)) %>% 
+  mutate(Decade = floor(Year_of_listing / 10) * 10) %>% 
+  filter(Decade %in% c(1910, 1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020)) %>% 
+  
+  # Count listings per municipality per decade
+  count(Decade, Municipality) %>% 
+  
+  # Use the top 10 for each decade
+  group_by(Decade) %>% 
+  slice_max(n, n = 10, with_ties = FALSE) %>% 
+  ungroup() %>% 
+  mutate(Decade_Label = ifelse(Decade == 2020, "2020–2026", paste0(Decade, "–", Decade + 9))) %>%
+  
+# Reorder the municipalities by number of listings in descending order
+mutate(Municipality = reorder_within(Municipality, n, Decade))
+
+# Put together the plot using facet_wrap
+plot_decade_leaderboard <- ggplot(top_municipalities_by_decade, aes(x = n, y = Municipality)) +
+  geom_col(fill = "darkred", color = "white", width = 0.7) +
+  geom_text(aes(label = n), hjust = -0.2, size = 2.5, family = "Georgia") +
+  facet_wrap(~ Decade_Label, scales = "free_y", ncol = 4) +
+  scale_y_reordered() +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.3))) +
+  labs(
+    title = "Which municipalities dominated heritage listings?",
+    subtitle = "Top 10 municipalities across decades",
+    x = "Number of buildings listed",
+    y = NULL,
+    caption = "Data: Slots- og Kulturstyrelsen (2026)"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Georgia"),
+    plot.title = element_text(face = "bold", size = 14),
+    panel.grid.major.y = element_blank(), # Drops unnecessary horizontal line clutter
+    strip.text = element_text(face = "bold", size = 8.5), # Bolds the decade panel labels
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_text(size = 6)
+  )
+
+# Print and save
+print(plot_decade_leaderboard)
+ggsave("municipality_leaders_by_decade.png", plot = plot_decade_leaderboard, width = 8, height = 6)
+```
+
